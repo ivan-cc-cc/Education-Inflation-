@@ -1,0 +1,10 @@
+---
+title: "关于从demand角度看industry"
+author: "Dai Yichao (IVAN)"
+date: "10/5/2020"
+output: html_document
+---
+
+```{r, cache=TRUE}
+dat1 = read.csv('2004准确数据库.csv')
+```

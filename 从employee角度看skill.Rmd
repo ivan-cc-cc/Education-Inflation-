@@ -1,0 +1,247 @@
+---
+title: "关于从employee角度看skill"
+author: "Dai Yichao (IVAN)"
+date: "10/5/2020"
+output: html_document
+---
+
+---
+
+```{r, echo=FALSE}
+options(warn = -1)
+suppressMessages(library(ggplot2))
+suppressMessages(library(Hmisc))
+suppressMessages(library(dplyr))
+suppressMessages(library(readxl))
+suppressMessages(library(gridExtra))
+suppressMessages(library(plotly))
+library(statsr)
+library(tidyr)
+library(scales)
+library(openxlsx)
+library(ggstatsplot)
+options(warn = 0)
+```
+
+### Introduction: 
+
+1. 在年鉴中寻找所有关于就业人数对这个角度的交叉分类，记录下来（例如：服务类／技工）
+
+2. 可以是关于数据中技师／技术种类
+
+3. 只提取纯制造业
+
+```{r, cache=TRUE}
+dat1 = read.csv('2004准确数据库.csv')
+行业类别名称FL = read_excel("国民经济行业分类与代码(GB-T-4754-2002).xlsx")
+行业类别名称 = read_excel("行业类别.xlsx")
+colnames(行业类别名称) = c('行业大类代码', '行业大类')
+indexFL = which(is.na(行业类别名称FL$行业代码))
+行业类别名称FL = 行业类别名称FL[-indexFL,]
+行业类别名称FL$行业代码 = as.numeric(行业类别名称FL$行业代码)
+```
+
+---
+
+### 提取所需变量，加入行业名称，Manipulate variable
+
+```{r}
+varNeeded2004 = dat1[c('行业类别',
+                     '全部从业人',
+                     "应付工资",
+                     "劳动保险费",
+                     "养老医疗保",
+                     "住房公积补",
+                     "营业收入合",
+                     "利润总额",
+                     '微机',
+                     '固定资产合',
+                     '所有者权益')]
+colnames(varNeeded2004)[1] = '行业代码'
+varNeeded2004$年份 = 2004
+行业大类代码 = character(0)  ### 行业大类代码
+
+for(i in 1:nrow(varNeeded2004)){
+        if(nchar(varNeeded2004$行业代码[i]) == 3){
+                行业大类代码[i] = substr(varNeeded2004$行业代码[i],1,1)
+        }
+        else{
+                行业大类代码[i] = substr(varNeeded2004$行业代码[i],1,2)
+        }
+}
+varNeeded2004$行业大类代码 = 行业大类代码      ### FIRM LEVEL TABLE
+varNeeded2004$行业大类代码 = as.numeric(varNeeded2004$行业大类代码)
+varNeeded2004$行业代码 = as.numeric(varNeeded2004$行业代码)
+a = which(colnames(dat1) == '从业人员男')
+b = which(colnames(dat1) == '从业人员女')
+学历职称2004 = dat1[,a:(b+12)]
+
+
+varNeeded2004 = left_join(varNeeded2004,行业类别名称FL,by = "行业代码")
+varNeeded2004 = left_join(varNeeded2004,行业类别名称,by = "行业大类代码")
+varNeeded2004 = cbind(varNeeded2004,学历职称2004)
+```
+
+---
+
+### 加入企业规模分类
+
+1. 300 以下为小规模企业
+
+2. 300-2000 为中规模企业
+
+3. 2000 以上为大规模企业
+
+```{r}
+varNeeded2004$规模 = cut2(varNeeded2004$全部从业人,cuts = c(300,2000))
+levels(varNeeded2004$规模) = c('Small Scale','Median Scale','Large Scale')
+varNeeded2004$企业个数 = 1
+```
+
+---
+
+### 表格重建，按照规模和4位数行业类别进行汇总
+
+按照规模和4位数行业类别进行汇总，并通过操纵不同的变量，来制造新的更加有意义的变量。
+
+高级教育： 研究生，本科，专科
+
+#### 职称和技工的区别：两种不同的体系。
+
+*职称制度是我国评价专业技术人才的基本制度。*
+
+*也就是说，你说这个专业技术人才好，好在哪里，有没有什么标准和依据，那么职称就可以说是一种标准和依据。*
+
+职称是指专业技术人员的技术水平、能力，是专业技术人员的的 **“专业技术职务任职资格”**。
+
+高级工是一种**职业技能或者职业资格等级**。
+
+两者应用的岗位不同。高级职称和高级工大多都是应用在事业单位，
+
+我国的事业单位分为管理岗位、专业技术岗和工勤岗，高级职称对应的是专业技术岗，高级工对应的是工勤岗。
+
+我国的职称是分为初级、中级、高级，其中高级又区分副高和正高
+
+职业技能等级分为五个等级，从一级到五级分别是高级技师、技师、高级工、中级工、初级工。
+
+
+
+承认技术人数： 高技职称男 + 中技职称男 + 初技职称男 + 高技职称女 + 中技职称女+ 初技职称女
+
+技术人数: 高级技师男 + 技师男 + 高级工男 + 中级工男 + 高级技师女 + 中级技师女 + 高级工女 + 中级工女
+
+技术水平 = 承认技术人数 / 全部从业人
+
+高等教育水平 = 高等教育 / 全部从业人
+
+
+```{r}
+varNeeded2004合计 = varNeeded2004 %>%
+        select(12, 1, 14, 15, 42,43, 2:11, 16:41) %>%
+        group_by(年份,行业代码,行业大类,`行业名称(FirmLevel)`,规模) %>%
+        summarise_all(sum,na.rm = TRUE)
+
+varNeeded2004合计 = varNeeded2004合计 %>% 
+        mutate(平均工资 = 应付工资 / 全部从业人)  %>% 
+        mutate(高等教育人数 = 研究生上男 + 本科学历男 + 大专学历男 + 研究生上女 + 本科学历女 + 大专学历女) %>%
+        mutate(`承认技术人数(职称)` = 高技职称男 + 中技职称男 + 初技职称男 + 高技职称女 + 中技职称女+ 初技职称女)%>%
+        mutate(技术人数 = 高级技师男 + 技师男 + 高级工男 + 中级工男 + 高级技师女 + 中级技师女 + 高级工女 + 中级工女) %>%
+        mutate(高等教育水平 = 高等教育人数 / 全部从业人) %>%
+        mutate( `承认技术水平(职称)` = `承认技术人数(职称)` / 全部从业人) %>%
+        mutate(`技术水平` = 技术人数 / 全部从业人)
+varNeeded2004合计 = varNeeded2004合计[ , -c(18:29, 31:42,12,13,15,16)]
+
+varNeeded2004合计 = varNeeded2004合计[grep('制造|制品', varNeeded2004合计$`行业名称(FirmLevel)`), ]
+varNeeded2004合计 = varNeeded2004合计[-grep('加工', varNeeded2004合计$`行业名称(FirmLevel)`), ]
+```
+
+### 承认技术水平 vs 技术水平
+
+```{r}
+p1 = ggplot(data = varNeeded2004合计, aes(x =`技术水平`,y = `承认技术水平(职称)`, color = 规模, label = `行业名称(FirmLevel)`))+
+        geom_point(alpha = 0.4)+
+        geom_smooth(method = 'lm', formula = y~x, se = FALSE, size = 0.5)+
+        geom_vline(xintercept = mean(varNeeded2004合计$`技术水平`), size = 0.4, alpha = 0.5)+
+        geom_hline(yintercept = mean(varNeeded2004合计$`承认技术水平(职称)`), size = 0.4, alpha = 0.5)+
+        theme(text=element_text(family='STFangsong'))+
+        theme(plot.title = element_text(hjust = 0.5, size = 15))+
+        labs(title = '承认技术水平 vs 技术水平')
+ggplotly(p1)
+
+```
+
+```{r}
+varNeeded2004合计 %>%
+        group_by(规模) %>%
+        summarise(avg_职称 = mean(`承认技术水平(职称)`),
+                  avg_技术 = mean(`技术水平`),
+                  std_职称 = sd(`承认技术水平(职称)`),
+                  std_技术 = sd(`技术水平`))
+vp <- varNeeded2004合计 %>%
+        gather('category', 'legend', `承认技术水平(职称)`, `技术水平`)
+vp %>%
+        ggplot(aes(x=规模, y=legend, fill = category, label = 行业大类))+
+        theme(text=element_text(family='STFangsong'))+
+        theme(plot.title = element_text(hjust = 0.5, size = 15))+
+        geom_text(aes(label= ifelse(legend > quantile(legend, 0.99),
+                              行业大类,''),family='STFangsong'),hjust=0,vjust=0,size=2)+
+        geom_boxplot()
+```
+
+```{r}
+varNeeded2004合计wu = varNeeded2004[,-42] %>%
+        select(12, 1, 14, 15, 42, 2:11, 16:41) %>%
+        group_by(年份,行业代码,行业大类,`行业名称(FirmLevel)`) %>%
+        summarise_all(sum,na.rm = TRUE)
+
+varNeeded2004合计wu = varNeeded2004合计wu %>% 
+        mutate(平均工资 = 应付工资 / 全部从业人)  %>% 
+        mutate(高等教育人数 = 研究生上男 + 本科学历男 + 大专学历男 + 研究生上女 + 本科学历女 + 大专学历女) %>%
+        mutate(`承认技术人数(职称)` = 高技职称男 + 中技职称男 + 初技职称男 + 高技职称女 + 中技职称女+ 初技职称女)%>%
+        mutate(技术人数 = 高级技师男 + 技师男 + 高级工男 + 中级工男 + 高级技师女 + 中级技师女 + 高级工女 + 中级工女) %>%
+        mutate(高等教育水平 = 高等教育人数 / 全部从业人) %>%
+        mutate( `承认技术水平(职称)` = `承认技术人数(职称)` / 全部从业人) %>%
+        mutate(`技术水平` = 技术人数 / 全部从业人)
+varNeeded2004合计wu = varNeeded2004合计wu[ , -c(17:28, 30:41,11,12,14,15)]
+
+varNeeded2004合计wu = varNeeded2004合计wu[grep('制造|制品', varNeeded2004合计wu$`行业名称(FirmLevel)`), ]
+varNeeded2004合计wu = varNeeded2004合计wu[-grep('加工', varNeeded2004合计wu$`行业名称(FirmLevel)`), ]
+```
+
+
+
+
+
+```{r}
+
+knitr::kable(head(varNeeded2004合计wu[order(varNeeded2004合计wu$`承认技术水平(职称)`, decreasing = TRUE), 
+                  c('行业大类', '行业名称(FirmLevel)', '全部从业人','承认技术人数(职称)','承认技术水平(职称)' )], 30))
+
+knitr::kable(tail(varNeeded2004合计wu[order(varNeeded2004合计wu$`承认技术水平(职称)`, decreasing = TRUE), 
+                  c('行业大类', '行业名称(FirmLevel)', '全部从业人','承认技术人数(职称)','承认技术水平(职称)' )], 30))
+
+
+knitr::kable(head(varNeeded2004合计wu[order(varNeeded2004合计wu$`技术水平`, decreasing = TRUE), 
+                  c('行业大类', '行业名称(FirmLevel)','全部从业人','技术人数','技术水平')], 30))
+
+knitr::kable(tail(varNeeded2004合计wu[order(varNeeded2004合计wu$`技术水平`, decreasing = TRUE), 
+                  c('行业大类', '行业名称(FirmLevel)','全部从业人','技术人数','技术水平')], 30))
+```
+
+
+```{r}
+knitr::kable(sort(table(head(varNeeded2004合计wu[order(varNeeded2004合计wu$`承认技术水平(职称)`, decreasing = TRUE), 
+                  '行业大类'], 100)), decreasing = TRUE))
+
+knitr::kable(sort(table(tail(varNeeded2004合计wu[order(varNeeded2004合计wu$`承认技术水平(职称)`, decreasing = TRUE), 
+                  '行业大类'], 100)),decreasing = TRUE))
+
+knitr::kable(sort(table(head(varNeeded2004合计wu[order(varNeeded2004合计wu$`技术水平`, decreasing = TRUE), 
+                  '行业大类'], 100)),decreasing = TRUE))
+
+knitr::kable(sort(table(tail(varNeeded2004合计wu[order(varNeeded2004合计wu$`技术水平`, decreasing = TRUE), 
+                  '行业大类'], 100)),decreasing = TRUE))
+```
+
+
+
